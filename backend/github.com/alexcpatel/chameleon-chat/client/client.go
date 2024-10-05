@@ -1,57 +1,68 @@
-package main
+package client
 
 import (
 	"context"
 	"log"
 	"sync/atomic"
 
-	"github.com/gorilla/websocket"
+	"github.com/alexcpatel/chameleon-chat/ai"
+	"github.com/alexcpatel/chameleon-chat/history"
 )
 
+type IncomingMessage struct {
+	Text      string `json:"text"`
+	Character string `json:"character"`
+}
+
+type OutgoingMessage struct {
+	SenderID int64  `json:"senderId"`
+	Text     string `json:"text"`
+	IsUser   bool   `json:"isUser"`
+}
+
+type broadcastMessage struct {
+	SenderID int64
+	Text     string
+}
+
 type Client struct {
-	ID               int64
-	Conn             *websocket.Conn
-	incomingMessages chan IncomingMessage
-	outgoingMessages chan OutgoingMessage
-	broadcastChan    chan BroadcastMessage
+	ID                  int64
+	IncomingMessageChan chan IncomingMessage
+	OutgoingMessageChan chan OutgoingMessage
+	broadcastChan       chan broadcastMessage
 }
 
 var (
 	clients               = make(map[int64]Client)
 	clientIDCounter int64 = 0
-	broadcastChan         = make(chan BroadcastMessage, 1000)
+	broadcastChan         = make(chan broadcastMessage, 1000)
 )
 
-type BroadcastMessage struct {
-	SenderID int64
-	Text     string
-}
-
-func addClient() Client {
+func AddClient() Client {
 	clientID := atomic.AddInt64(&clientIDCounter, 1)
 	client := Client{
-		ID:               clientID,
-		incomingMessages: make(chan IncomingMessage, 100),
-		outgoingMessages: make(chan OutgoingMessage, 100),
-		broadcastChan:    make(chan BroadcastMessage, 100),
+		ID:                  clientID,
+		IncomingMessageChan: make(chan IncomingMessage, 100),
+		OutgoingMessageChan: make(chan OutgoingMessage, 100),
+		broadcastChan:       make(chan broadcastMessage, 100),
 	}
 	clients[clientID] = client
 	return client
 }
 
-func deleteClient(client Client) {
+func DeleteClient(client Client) {
 	delete(clients, client.ID)
 }
 
-func (client *Client) loop(ctx context.Context) {
+func (client *Client) Loop(ctx context.Context) {
 	for {
 		select {
-		case incomingMessage := <-client.incomingMessages:
+		case incomingMessage := <-client.IncomingMessageChan:
 			if err := client.handleIncomingMessage(incomingMessage); err != nil {
 				log.Printf("error handling message: %v", err)
 			}
 		case broadcastMessage := <-client.broadcastChan:
-			client.outgoingMessages <- OutgoingMessage{
+			client.OutgoingMessageChan <- OutgoingMessage{
 				SenderID: broadcastMessage.SenderID,
 				Text:     broadcastMessage.Text,
 				IsUser:   false,
@@ -68,37 +79,36 @@ func (client *Client) handleIncomingMessage(incomingMessage IncomingMessage) err
 	log.Printf("Received message from client %d: %s", client.ID, incomingMessage.Text)
 
 	// Generate AI message
-	aiMsg, err := generateAiMessage(incomingMessage.Text)
+	aiMsg, err := ai.GenerateMessage(incomingMessage.Character, incomingMessage.Text)
 	if err != nil {
 		log.Printf("error handling message: %v", err)
 		return err
 	}
 
 	// Store message
-	storedMessagesChan <- StoredMessage{
+	history.StoreMessage(history.StoredMessage{
 		ClientID: client.ID,
 		RawMsg:   incomingMessage.Text,
 		AiMsg:    aiMsg,
-	}
+	})
 
 	// Send message to client
-	client.outgoingMessages <- OutgoingMessage{
+	client.OutgoingMessageChan <- OutgoingMessage{
 		SenderID: client.ID,
 		Text:     aiMsg,
 		IsUser:   true,
 	}
 
 	// Broadcast the message to all clients
-	broadcastChan <- BroadcastMessage{
+	broadcastChan <- broadcastMessage{
 		SenderID: client.ID,
-		Text:     incomingMessage.Text,
+		Text:     aiMsg,
 	}
 
 	return nil
 }
 
-// New goroutine to handle broadcasting messages
-func broadcastMessages(ctx context.Context) {
+func BroadcastMessages(ctx context.Context) {
 	for {
 		select {
 		case broadcastMessage := <-broadcastChan:
