@@ -40,68 +40,66 @@ var (
 
 func AddClient() Client {
 	clientID := atomic.AddInt64(&clientIDCounter, 1)
-	client := Client{
+	cli := Client{
 		ID:                  clientID,
 		IncomingMessageChan: make(chan IncomingMessage, 100),
 		OutgoingMessageChan: make(chan OutgoingMessage, 100),
 		broadcastChan:       make(chan broadcastMessage, 100),
 	}
-	clients[clientID] = client
-	return client
+	clients[clientID] = cli
+	return cli
 }
 
-func DeleteClient(client Client) {
-	delete(clients, client.ID)
+func DeleteClient(cli Client) {
+	delete(clients, cli.ID)
 }
 
-func (client *Client) Loop(ctx context.Context) {
+func (cli *Client) Loop(ctx context.Context) {
 	for {
 		select {
-		case incomingMessage := <-client.IncomingMessageChan:
-			if err := client.handleIncomingMessage(incomingMessage); err != nil {
+		case incomingMessage := <-cli.IncomingMessageChan:
+			log.Printf("Received message from client %d: %s", cli.ID, incomingMessage.Text)
+			if err := cli.handleIncomingMessage(incomingMessage); err != nil {
 				log.Printf("error handling message: %v", err)
 			}
-		case broadcastMessage := <-client.broadcastChan:
-			client.OutgoingMessageChan <- OutgoingMessage{
+		case broadcastMessage := <-cli.broadcastChan:
+			cli.OutgoingMessageChan <- OutgoingMessage{
 				SenderID: broadcastMessage.SenderID,
 				Text:     broadcastMessage.Text,
 				IsUser:   false,
 			}
 		case <-ctx.Done():
-			log.Printf("Leaving client loop for client %d", client.ID)
+			log.Printf("Leaving client loop for client %d", cli.ID)
 			return
 		}
 	}
 }
 
-func (client *Client) handleIncomingMessage(incomingMessage IncomingMessage) error {
-	// Print the received message
-	log.Printf("Received message from client %d: %s", client.ID, incomingMessage.Text)
+func (cli *Client) handleIncomingMessage(incomingMessage IncomingMessage) error {
 
 	// Generate AI message
 	aiMsg, err := ai.GenerateMessage(incomingMessage.Character, incomingMessage.Text)
 	if err != nil {
-		log.Printf("error handling message: %v", err)
 		return err
 	}
 
 	// Store message
 	history.StoreMessage(history.StoredMessage{
-		ClientID: client.ID,
+		ClientID: cli.ID,
 		RawMsg:   incomingMessage.Text,
 		AiMsg:    aiMsg,
 	})
 
 	// Send message to client
-	client.OutgoingMessageChan <- OutgoingMessage{
-		SenderID: client.ID,
+	cli.OutgoingMessageChan <- OutgoingMessage{
+		SenderID: cli.ID,
 		Text:     aiMsg,
 		IsUser:   true,
 	}
 
 	// Broadcast the message to all clients
 	broadcastChan <- broadcastMessage{
-		SenderID: client.ID,
+		SenderID: cli.ID,
 		Text:     aiMsg,
 	}
 
@@ -112,9 +110,9 @@ func BroadcastMessages(ctx context.Context) {
 	for {
 		select {
 		case broadcastMessage := <-broadcastChan:
-			for _, client := range clients {
-				if broadcastMessage.SenderID != client.ID {
-					client.broadcastChan <- broadcastMessage
+			for _, cli := range clients {
+				if broadcastMessage.SenderID != cli.ID {
+					cli.broadcastChan <- broadcastMessage
 				}
 			}
 		case <-ctx.Done():

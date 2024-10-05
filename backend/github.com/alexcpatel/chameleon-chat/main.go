@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"time"
 
 	"github.com/alexcpatel/chameleon-chat/ai"
@@ -71,6 +72,7 @@ func main() {
 
 	e.GET("/characters", getCharacters)
 	e.GET("/chat", handleChat)
+	e.GET("/history", getHistory)
 
 	// Create a context that we can cancel
 	ctx, cancel := context.WithCancel(context.Background())
@@ -183,4 +185,26 @@ func handleChat(c echo.Context) error {
 	}
 
 	return nil
+}
+
+func getHistory(c echo.Context) error {
+	n := 10
+	if nStr := c.QueryParam("n"); nStr != "" {
+		if parsedN, err := strconv.Atoi(nStr); err == nil {
+			n = parsedN
+		}
+	}
+
+	messages := history.GetHistory(n)
+	response := make([]client.OutgoingMessage, len(messages))
+
+	for i, msg := range messages {
+		response[i] = client.OutgoingMessage{
+			SenderID: msg.ClientID,
+			Text:     msg.AiMsg,
+			IsUser:   false,
+		}
+	}
+
+	return c.JSON(http.StatusOK, response)
 }

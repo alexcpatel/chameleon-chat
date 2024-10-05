@@ -59,7 +59,7 @@ func createPrompt(characterName string, userMessage string) (string, error) {
 
 	prompt := characterData.SystemPrompt + "\n\n"
 	prompt += "===== CHARACTER INFORMATION =====\n"
-	prompt += "Name: " + character.Name + "\n"
+	prompt += "Character Name: " + character.Name + "\n"
 	prompt += "Description: " + character.Description + "\n"
 	prompt += "Voice Prompt: " + character.VoicePrompt + "\n\n"
 
@@ -72,9 +72,8 @@ func createPrompt(characterName string, userMessage string) (string, error) {
 	}
 
 	prompt += "===== TRANSLATION TASK =====\n"
-	prompt += "Your task is to translate the following message into the character's style:\n\n"
-	prompt += "Original message: " + userMessage + "\n\n"
-	prompt += "Translated message (in character's voice):\n"
+	prompt += "Original message: !!! '" + userMessage + "' !!!\n\n"
+	prompt += "Translated message: "
 
 	return prompt, nil
 }
@@ -84,5 +83,11 @@ func GenerateMessage(characterName string, userMessage string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return prompt, nil
+
+	response, err := callClaudeAPI(prompt)
+	if err != nil {
+		return "", fmt.Errorf("error calling Claude API: %v", err)
+	}
+
+	return response, nil
 }
